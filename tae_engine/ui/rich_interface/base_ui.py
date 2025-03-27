@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple, Callable
+from typing import Any, Dict, Tuple, Callable, Optional, Union, List
 from rich.console import Console
 from rich.panel import Panel
 from rich.layout import Layout
@@ -11,14 +11,23 @@ from tae_engine.game_state import GameState
 class BaseUI:
     """Base class for all UI elements."""
     
-    def __init__(self, console: Console = None):
+    def __init__(self, console: Console = None, game_state: GameState = None, scene_manager = None):
+        """
+        Initialize the UI with a console and game state.
+        
+        Args:
+            console: The Rich console to use for display
+            game_state: The game state to use (or create a new one if None)
+            scene_manager: Optional scene manager to use for back operation
+        """
         self.console = console or Console()
-        self.game_state = GameState()
+        self.game_state = game_state or GameState()
+        self.scene_manager = scene_manager
         self.default_actions = {
             'q': ('Quit', self.quit_game),
             's': ('Save', self.save_game),
             'l': ('Load', self.load_game),
-            'u': ('Undo', self.undo),
+            'b': ('Back', self.back),
         }
     
     def clear_screen(self) -> None:
@@ -58,22 +67,24 @@ class BaseUI:
             if 0 <= index < len(files):
                 self.game_state = GameState.load(files[index])
                 self.console.print(f"Loaded game from {files[index]}")
+                return self.game_state  # Return the loaded game state
             else:
                 self.console.print("Invalid selection.")
         except ValueError:
             self.console.print("Invalid input.")
     
-    def undo(self) -> None:
-        """Undo the last action."""
-        if len(self.game_state.history) > 1:
-            self.game_state.history.pop()  # Remove current state
-            previous_state = self.game_state.history[-1]  # Get previous state
-            # Restore previous state
-            for key, value in previous_state.items():
-                setattr(self.game_state, key, value)
-            self.console.print("Last action undone.")
+    def back(self) -> None:
+        """Go back to previous state using scene manager if available."""
+        if self.scene_manager:
+            if self.scene_manager.back():
+                self.console.print("Went back to previous state.")
+                # Update the local game_state reference to match scene_manager
+                self.game_state = self.scene_manager.game_state
+            else:
+                self.console.print("Can't go back any further.")
         else:
-            self.console.print("Nothing to undo.")
+            # Legacy fallback for when no scene_manager is available
+            self.console.print("Back function requires a scene manager.")
     
     def create_footer(self) -> Panel:
         """Create a footer with default actions."""

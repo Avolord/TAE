@@ -9,7 +9,7 @@ class Effect:
         pass
     
     @staticmethod
-    def create(effect_data: Union[Dict, str, 'Effect', Callable]) -> 'Effect':
+    def create(effect_data: Union[Dict, str, 'Effect', Callable, List]) -> 'Effect':
         """
         Factory method to create an effect from various formats.
         
@@ -118,6 +118,11 @@ class Effect:
                 
             else:
                 raise ValueError(f"Unknown effect type: {effect_type}")
+        
+        if isinstance(effect_data, List):
+            return CompoundEffect([
+                Effect.create(sub_effect) for sub_effect in effect_data
+            ])
         
         raise ValueError(f"Cannot create effect from: {effect_data}")
 

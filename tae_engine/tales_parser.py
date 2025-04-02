@@ -110,7 +110,7 @@ class TalesParser:
                 if level == 0:
                     # Found the matching closing bracket
                     # Join parts with space, trim leading/trailing whitespace
-                    return " ".join(content_parts).strip(), pos + 1
+                    return "".join(content_parts).strip(), pos + 1
             # Only append if we are not the final closing bracket
             if level > 0:
                  content_parts.append(token_value)
@@ -240,7 +240,7 @@ class TalesParser:
     def _parse_condition(self, condition_tokens: List[Tuple[TokenType, str]]) -> Condition:
          # This is used by IfElement, keep placeholder logic for now
          # ... (previous placeholder implementation) ...
-         rep = " ".join(t[1] for t in condition_tokens)
+         rep = "".join(t[1] for t in condition_tokens)
          return Condition(representation=rep)
 
 

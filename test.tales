@@ -1,0 +1,40 @@
+// complex_test.tales - Testing complex syntax and edge cases
+
+@scene dark_cave // Scene definition
+
+> Cave Echo: You stand in a damp, dark cave... // Simple dialogue
+* Look around {} {set_var:looked_around:true} // Choice with simple effect (empty condition block required if no condition needed)
+* Light a torch {check_item:torch:>=:1} {add_stat:light_level:5} {remove_item:torch:1} // Choice with condition and multiple effects
+** Examine the torch closely // Nested choice (no effect)
+
+@if check_var:looked_around:==:true // Check variable set earlier
+  > Narrator: You notice strange markings on the wall.
+  @if check_stat:perception:>=:15 // Nested condition
+    > Narrator: They seem to depict a dragon! {add_journal:dragon_lore:1}
+  @else
+    > Narrator: You can't quite make them out. // Dialogue after else
+  @endif // End inner if
+* Touch the markings {} {set_var:touched_markings:true}
+@else // Else for looked_around check
+  > Narrator: It's too dark to see much.
+@endif // End outer if
+
+// Test spacing and multiple effects on one line
+* Try to leave -> cave_entrance {} { add_stat:courage:-5 } { set_var:tried_exit:true } // Transition with effects (mixed spacing)
+
+@if check_var:touched_markings:==:true
+  @if check_stat:light_level:>=:5 // Another nested check
+     > Dragon Spirit: You have awakened me! {start_encounter:AncientDragon}
+  @endif // No else here is valid
+@endif
+
+// Test line directly after endif
+> Cave Echo: The air grows colder...
+
+* Shout into the darkness {} {add_stat:noise:10} // Final choice
+
+// End of file test
+
+@scene another_scene
+
+> Narrator: This is a scene

@@ -1,40 +1,75 @@
-// complex_test.tales - Testing complex syntax and edge cases
+// A simple example TALES script
 
-@scene dark_cave // Scene definition
+@scene village_entrance
 
-> Cave Echo: You stand in a damp, dark cave... // Simple dialogue
-* Look around {} {set_var:looked_around:true} // Choice with simple effect (empty condition block required if no condition needed)
-* Light a torch {check_item:torch:>=:1} {add_stat:light_level:5} {remove_item:torch:1} // Choice with condition and multiple effects
-** Examine the torch closely // Nested choice (no effect)
+> Village Elder: Welcome, traveler, to our humble village. {set_var:greeted:true}
+> Village Elder: What brings you to our lands?
 
-@if check_var:looked_around:==:true // Check variable set earlier
-  > Narrator: You notice strange markings on the wall.
-  @if check_stat:perception:>=:15 // Nested condition
-    > Narrator: They seem to depict a dragon! {add_journal:dragon_lore:1}
-  @else
-    > Narrator: You can't quite make them out. // Dialogue after else
-  @endif // End inner if
-* Touch the markings {} {set_var:touched_markings:true}
-@else // Else for looked_around check
-  > Narrator: It's too dark to see much.
-@endif // End outer if
+* I'm looking for adventure {} {set_var:seeking_adventure:true}
+* I seek treasure {} {set_var:seeking_treasure:true}
+* I'm just passing through {} {set_var:passing_through:true}
 
-// Test spacing and multiple effects on one line
-* Try to leave -> cave_entrance {} { add_stat:courage:-5 } { set_var:tried_exit:true } // Transition with effects (mixed spacing)
-
-@if check_var:touched_markings:==:true
-  @if check_stat:light_level:>=:5 // Another nested check
-     > Dragon Spirit: You have awakened me! {start_encounter:AncientDragon}
-  @endif // No else here is valid
+@if check_var:seeking_adventure:==:true
+  > Village Elder: A true adventurer! The mountains to the north hold many challenges.
+  * Tell me more about these mountains -> mountain_info {}
+  * I'll be on my way then -> village_square {}
 @endif
 
-// Test line directly after endif
-> Cave Echo: The air grows colder...
+@if check_var:seeking_treasure:==:true
+  > Village Elder: Ah, a treasure hunter. There are rumors of ancient riches in the caves.
+  * What kind of treasures? -> treasure_info {}
+  * I'll be on my way then -> village_square {}
+@endif
 
-* Shout into the darkness {} {add_stat:noise:10} // Final choice
+@if check_var:passing_through:==:true
+  > Village Elder: Safe travels then. Our village offers a place to rest if you need it.
+  * I could use some rest -> village_inn {}
+  * I'll be on my way -> village_square {}
+@endif
 
-// End of file test
+@scene mountain_info
 
-@scene another_scene
+> Village Elder: The northern mountains are home to fearsome creatures and ancient ruins.
+> Village Elder: Only the bravest adventurers return with both their lives and glory.
+* I'm ready for the challenge {} {add_stat:courage:10}
+* Perhaps I should prepare more -> village_square {}
 
-> Narrator: This is a scene
+@scene treasure_info
+
+> Village Elder: Ancient artifacts, gold, and magical items lie hidden in the cave system.
+> Village Elder: But beware, they are guarded by deadly traps and mysterious guardians.
+* Where exactly are these caves? {} {add_item:Cave Map:1}
+* I should gather supplies first -> village_square {}
+
+@scene village_inn
+
+> Innkeeper: Welcome to our humble inn, traveler! A room for the night?
+* Yes, I'll stay the night {check_stat:gold:>=:10} {add_stat:gold:-10} {set_stat:health:100}
+* No thanks, just passing through -> village_square {}
+
+@scene village_square
+
+> Narrator: You find yourself in the village square. People bustle about their daily business.
+> Narrator: There are several paths you could take from here.
+
+* Head to the northern mountains -> mountain_path {}
+* Explore the nearby caves -> cave_entrance {has_item:Torch:1}
+* Visit the local shop -> village_shop {}
+* Leave the village -> village_exit {}
+
+@scene village_shop
+
+> Shopkeeper: Welcome! What can I interest you in today?
+
+* Buy a torch (5 gold) {check_stat:gold:>=:5} {add_stat:gold:-5} {add_item:Torch:1}
+* Buy a health potion (15 gold) {check_stat:gold:>=:15} {add_stat:gold:-15} {add_item:Health Potion:1}
+* Just browsing -> village_square {}
+
+@scene village_exit
+
+> Narrator: As you prepare to leave the village, you reflect on what you've learned.
+> Narrator: Your adventure is just beginning.
+
+* Continue on the road {} {set_var:game_completed:true}
+
+// End of simple example

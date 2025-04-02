@@ -1,194 +1,363 @@
 """
-Demo showing how to use the simplified SceneManager with updated UI components.
+TALES Runner - Runs TALES scripts using the Text Adventure Engine.
+
+This module provides a bridge between TALES scripts and the TAE engine,
+converting parsed TALES elements into runnable TAE components.
 """
+from typing import List, Dict, Any, Optional, Union
+import argparse
 from rich.console import Console
 
 from tae_engine.game_state import GameState
+from tae_engine.conditions import Condition
+from tae_engine.effects import Effect
 from tae_engine.choice import Choice, ChoiceSet
-from tae_engine.ui.rich_interface.base_ui import BaseUI
-from tae_engine.ui.rich_interface.choice_box import ChoiceBox
-from tae_engine.ui.rich_interface.dialogue_box import DialogueBox
-from tae_engine.ui.rich_interface.inventory_ui import InventoryUI
 from tae_engine.scene_manager import SceneManager
+from tae_engine.ui.rich_interface.dialogue_box import DialogueBox
+from tae_engine.ui.rich_interface.choice_box import ChoiceBox
+from tae_engine.ui.rich_interface.base_ui import BaseUI
+
+from tae_engine.tales_parser import (
+    TalesParser, 
+    SceneElement, 
+    DialogueElement, 
+    ChoiceElement, 
+    IfElement
+)
+from tae_engine.tales_lexer import TalesLexer
+
+
+class TalesRunner:
+    """
+    Runs TALES scripts using the Text Adventure Engine.
+    
+    This class converts AST elements produced by the TalesParser into
+    executable TAE components and manages the game flow.
+    """
+    
+    def __init__(self, console: Optional[Console] = None):
+        """
+        Initialize the TalesRunner.
+        
+        Args:
+            console: Optional Rich console instance for UI rendering
+        """
+        self.console = console or Console()
+        self.scene_manager = SceneManager()
+        self.ast = []
+        
+    def load_from_file(self, filename: str) -> None:
+        """
+        Load and parse a TALES script from a file.
+        
+        Args:
+            filename: Path to the TALES script file
+        """
+        try:
+            with open(filename, "r", encoding="utf-8") as file:
+                tale_script = file.read()
+            
+            # Tokenize and parse the script
+            self.console.print(f"[bold blue]Lexing[/bold blue] {filename}...")
+            tokenized_lines = TalesLexer.tokenize(tale_script)
+            
+            self.console.print(f"[bold blue]Parsing[/bold blue] {filename}...")
+            parser = TalesParser(tokenized_lines)
+            self.ast = parser.parse()
+            
+            # Register scenes with the scene manager
+            self._register_scenes()
+            self.console.print(f"[bold green]Successfully loaded[/bold green] {len(self.ast)} scenes.")
+        except Exception as e:
+            self.console.print(f"[bold red]Error loading script:[/bold red] {e}")
+            raise
+    
+    def _register_scenes(self) -> None:
+        """Register all scenes from the AST with the scene manager."""
+        for scene_element in self.ast:
+            # Create a scene handler function that will process the scene's content
+            scene_handler = self._create_scene_handler(scene_element)
+            
+            # Register the scene with the scene manager
+            self.scene_manager.register_scene(scene_element.scene_name, scene_handler)
+            self.console.print(f"  Registered scene: [cyan]{scene_element.scene_name}[/cyan]")
+    
+    def _create_scene_handler(self, scene_element: SceneElement):
+        """
+        Create a scene handler function for a scene element.
+        
+        Args:
+            scene_element: The parsed scene element
+            
+        Returns:
+            A function that handles the scene
+        """
+        # Store a reference to the scene element in the closure
+        scene_content = scene_element.content
+        scene_name = scene_element.scene_name
+        
+        # Define the scene handler function
+        def scene_handler(scene_manager, **kwargs):
+            # Initialize UI components
+            dialogue_ui = DialogueBox(self.console)
+            dialogue_ui.game_state = scene_manager.game_state
+            dialogue_ui.scene_manager = scene_manager
+            
+            choice_ui = ChoiceBox(self.console)
+            choice_ui.game_state = scene_manager.game_state
+            choice_ui.scene_manager = scene_manager
+            
+            # Process each element in the scene
+            self._process_scene_content(scene_content, scene_manager, dialogue_ui, choice_ui, scene_name)
+        
+        return scene_handler
+    
+    def _process_scene_content(
+        self,
+        content: List[Any],
+        scene_manager: SceneManager,
+        dialogue_ui: DialogueBox,
+        choice_ui: ChoiceBox,
+        scene_name: str = "unknown"
+    ) -> None:
+        """
+        Process the content of a scene.
+        
+        Args:
+            content: List of scene elements to process
+            scene_manager: The SceneManager instance
+            dialogue_ui: The DialogueBox UI component
+            choice_ui: The ChoiceBox UI component
+            scene_name: Name of the current scene for debugging
+        """
+        # Group consecutive choices to display together
+        choice_group = []
+        
+        for element in content:
+            # If we have accumulated choices and the next element is not a choice,
+            # process the choice group before moving on
+            if choice_group and not isinstance(element, ChoiceElement):
+                self._process_choice_group(choice_group, scene_manager, choice_ui, scene_name)
+                choice_group = []
+            
+            # Process the current element based on its type
+            if isinstance(element, DialogueElement):
+                self._process_dialogue(element, dialogue_ui, scene_manager)
+            elif isinstance(element, ChoiceElement):
+                # Add to the choice group to process later
+                choice_group.append(element)
+            elif isinstance(element, IfElement):
+                # Evaluate the condition and process the appropriate branch
+                self._process_if_element(element, scene_manager, dialogue_ui, choice_ui, scene_name)
+        
+        # Process any remaining choices
+        if choice_group:
+            self._process_choice_group(choice_group, scene_manager, choice_ui, scene_name)
+    
+    def _process_dialogue(
+        self,
+        dialogue: DialogueElement,
+        dialogue_ui: DialogueBox,
+        scene_manager: SceneManager
+    ) -> None:
+        """
+        Process a dialogue element.
+        
+        Args:
+            dialogue: The dialogue element to process
+            dialogue_ui: The DialogueBox UI component
+            scene_manager: The SceneManager instance
+        """
+        # Convert effects to Effect objects if any exist
+        effects = None
+        if dialogue.effects:
+            effects = []
+            for effect_str in dialogue.effects:
+                try:
+                    effect = Effect.create(effect_str)
+                    effects.append(effect)
+                except ValueError as e:
+                    self.console.print(f"[bold yellow]Warning:[/bold yellow] Invalid effect '{effect_str}': {e}")
+        
+        # Show the dialogue
+        dialogue_ui.show(
+            dialogue.speaker,
+            [dialogue.dialogue_text],  # Wrapped in a list as show() expects a list of lines
+            effects=effects,
+            scene_manager=scene_manager
+        )
+    
+    def _process_choice_group(
+        self,
+        choices: List[ChoiceElement],
+        scene_manager: SceneManager,
+        choice_ui: ChoiceBox,
+        scene_name: str = "unknown"
+    ) -> None:
+        """
+        Process a group of choices.
+        
+        Args:
+            choices: List of choice elements to process
+            scene_manager: The SceneManager instance
+            choice_ui: The ChoiceBox UI component
+            scene_name: Name of the current scene for debugging
+        """
+        # TODO: Add full support for nested choices in the future
+        # Currently, choices are flattened and all shown together
+        
+        # Convert ChoiceElements to TAE Choice objects
+        tae_choices = []
+        for choice_element in choices:
+            try:
+                # Create a Choice object
+                tae_choice = self._create_tae_choice(choice_element)
+                tae_choices.append(tae_choice)
+            except ValueError as e:
+                self.console.print(f"[bold yellow]Warning:[/bold yellow] Skipping invalid choice in scene '{scene_name}': {e}")
+        
+        if not tae_choices:
+            self.console.print(f"[bold yellow]Warning:[/bold yellow] No valid choices in scene '{scene_name}'")
+            return
+        
+        # Create a ChoiceSet
+        choice_set = ChoiceSet(tae_choices)
+        
+        # Show the choices
+        choice_ui.show(scene_name, choice_set, scene_manager, "What will you do?")
+    
+    def _create_tae_choice(self, choice_element: ChoiceElement) -> Choice:
+        """
+        Create a TAE Choice object from a ChoiceElement.
+        
+        Args:
+            choice_element: The parsed choice element
+            
+        Returns:
+            A TAE Choice object
+        """
+        # Parse condition string if it exists
+        condition = None
+        if choice_element.condition_str:
+            try:
+                condition = choice_element.condition_str.strip()
+            except Exception as e:
+                self.console.print(f"[bold yellow]Warning:[/bold yellow] Invalid condition '{choice_element.condition_str}': {e}")
+        
+        # Parse effect strings if they exist
+        effect = None
+        if choice_element.effects:
+            if len(choice_element.effects) == 1:
+                # Single effect
+                effect = choice_element.effects[0].strip()
+            else:
+                # Multiple effects as a list
+                effect = [e.strip() for e in choice_element.effects]
+        
+        # Create the Choice object
+        return Choice(
+            text=choice_element.text,
+            condition=condition,
+            effect=effect,
+            next_scene=choice_element.transition
+        )
+    
+    def _process_if_element(
+        self,
+        if_element: IfElement,
+        scene_manager: SceneManager,
+        dialogue_ui: DialogueBox,
+        choice_ui: ChoiceBox,
+        scene_name: str = "unknown"
+    ) -> None:
+        """
+        Process an if element.
+        
+        Args:
+            if_element: The if element to process
+            scene_manager: The SceneManager instance
+            dialogue_ui: The DialogueBox UI component
+            choice_ui: The ChoiceBox UI component
+            scene_name: Name of the current scene for debugging
+        """
+        # Convert the condition string to a Condition object
+        condition_str = if_element.condition.representation.strip()
+        
+        try:
+            # Create and evaluate the condition
+            condition = Condition.create(condition_str)
+            condition_met = condition.check(scene_manager.game_state)
+            
+            if condition_met:
+                # Process the if branch
+                self._process_scene_content(if_element.if_block, scene_manager, dialogue_ui, choice_ui, scene_name)
+            elif if_element.else_block:
+                # Process the else branch if it exists
+                self._process_scene_content(if_element.else_block, scene_manager, dialogue_ui, choice_ui, scene_name)
+                
+        except ValueError as e:
+            self.console.print(f"[bold yellow]Warning:[/bold yellow] Invalid condition '{condition_str}' in scene '{scene_name}': {e}")
+            # Skip this condition block
+    
+    def run(self, starting_scene: Optional[str] = None) -> None:
+        """
+        Run the TALES script.
+        
+        Args:
+            starting_scene: Optional name of the scene to start from
+        """
+        try:
+            if not self.ast:
+                self.console.print("[bold red]No script loaded. Call load_from_file() first.[/bold red]")
+                return
+            
+            # Default to the first scene if none specified
+            if not starting_scene and self.ast:
+                starting_scene = self.ast[0].scene_name
+                
+            self.console.print(f"[bold green]Starting game[/bold green] from scene: [cyan]{starting_scene}[/cyan]")
+            
+            # Set up initial game state
+            # You can customize this with default values
+            self.scene_manager.game_state.update_stat("health", 100)
+            
+            # Run the game using the scene manager
+            self.scene_manager.run_game(starting_scene)
+            
+            self.console.print("[bold green]Game completed.[/bold green]")
+            
+        except Exception as e:
+            self.console.print(f"[bold red]Error running script:[/bold red] {e}")
+            raise
 
 
 def main():
-    """Main entry point for the demo."""
-    # Initialize the console and scene manager
-    console = Console()
-    scene_manager = SceneManager()
+    """Main entry point for running TALES scripts."""
+    parser = argparse.ArgumentParser(description="Run a TALES script using the Text Adventure Engine")
+    parser.add_argument("script", help="Path to the TALES script file")
+    parser.add_argument("--scene", help="Name of the scene to start from")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
     
-    # Initialize the game state with some starting values
-    scene_manager.game_state.update_stat("health", 100)
-    scene_manager.game_state.update_stat("gold", 50)
-    scene_manager.game_state.add_to_inventory("Rusty Sword", 1)
+    args = parser.parse_args()
     
-    # Register scenes
-    scene_manager.register_scene("start", scene_start)
-    scene_manager.register_scene("forest", scene_forest)
-    scene_manager.register_scene("forest_treasure", scene_forest_treasure)
-    scene_manager.register_scene("inventory", scene_inventory)
-    scene_manager.register_scene("end", scene_end)
+    # Create the console with appropriate settings
+    console = Console(highlight=True, log_path=False, log_time=args.debug)
     
-    # Start the game
-    scene_manager.run_game("start")
-
-
-def scene_start(scene_manager, **kwargs):
-    """Starting scene with dialogue and choices."""
-    # Create UI components with the shared console
-    console = Console()
-    dialogue_ui = DialogueBox(console)
-    dialogue_ui.game_state = scene_manager.game_state
+    # Create the TalesRunner
+    runner = TalesRunner(console)
     
-    choice_ui = ChoiceBox(console)
-    choice_ui.game_state = scene_manager.game_state
-    
-    # Show dialogue with scene_manager for the back action
-    dialogue_ui.show(
-        "Guide", 
-        [
-            "Welcome, adventurer! You find yourself at the edge of a mysterious forest.",
-            "Be careful - dangers lurk within the trees. But so do treasures!",
-            "What would you like to do?"
-        ],
-        "The Adventure Begins",
-        scene_manager=scene_manager
-    )
-    
-    # Define choices
-    choices = ChoiceSet([
-        Choice(
-            text="Enter the forest", 
-            next_scene="forest"
-        ),
-        Choice(
-            text="Check my inventory first",
-            next_scene="inventory"
-        ),
-        Choice(
-            text="Rest to recover health",
-            effect="set_stat:health:100", 
-            next_scene="start"
-        ),
-        # This choice requires having at least 100 gold
-        Choice(
-            text="Buy a better sword (100 gold)",
-            condition="check_stat:gold:>=:100", 
-            effect=[
-                "add_stat:gold:-100",
-                "add_item:Steel Sword:1"
-            ],
-            next_scene="start"
-        )
-    ])
-    
-    # Show choices
-    choice_ui.show("Forest Edge", choices, scene_manager, "What will you do?")
-
-
-def scene_forest(scene_manager, **kwargs):
-    """Forest scene with encounter."""
-    console = Console()
-    dialogue_ui = DialogueBox(console)
-    dialogue_ui.game_state = scene_manager.game_state
-    
-    choice_ui = ChoiceBox(console)
-    choice_ui.game_state = scene_manager.game_state
-    
-    # Show description
-    dialogue_ui.show(
-        "Narrator", 
-        [
-            "You venture into the dense forest. The canopy above blocks most of the sunlight.",
-            "As you walk deeper, you hear rustling in the bushes ahead..."
-        ],
-        "The Dark Forest",
-        scene_manager=scene_manager
-    )
-    
-    # Create a choice set with a combat encounter
-    choices = ChoiceSet([
-        Choice(
-            text="Attack with your weapon", 
-            effect="add_stat:health:-10",  # You get hurt a bit
-            next_scene="forest_treasure"
-        ),
-        Choice(
-            text="Use Steel Sword for powerful attack",
-            condition="has_item:Steel Sword:1",
-            next_scene="forest_treasure"
-        ),
-        Choice(
-            text="Try to sneak past",
-            condition="check_stat:health:>:50",  # Need to be healthy to sneak
-            next_scene="forest_treasure"
-        ),
-        Choice(
-            text="Run back to the forest edge",
-            next_scene="start"
-        )
-    ])
-    
-    choice_ui.show("Forest Encounter", choices, scene_manager, "A goblin jumps out!")
-
-
-def scene_forest_treasure(scene_manager, **kwargs):
-    """Finding treasure after the encounter."""
-    console = Console()
-    dialogue_ui = DialogueBox(console)
-    dialogue_ui.game_state = scene_manager.game_state
-    
-    # Show treasure discovery
-    dialogue_ui.show(
-        "Narrator", 
-        [
-            "You defeated the goblin! Behind where it was hiding, you find a small chest.",
-            "Inside is a potion and 50 gold coins."
-        ],
-        "Victory!",
-        scene_manager=scene_manager
-    )
-    
-    # Apply effects for finding treasure
-    scene_manager.apply_effect("add_item:Health Potion:1", "Found a healing potion")
-    scene_manager.apply_effect("add_stat:gold:50", "Found 50 gold coins")
-    
-    # Transition to end scene
-    scene_manager.transition_to("end", "Completed forest adventure")
-
-
-def scene_inventory(scene_manager, **kwargs):
-    """Display the player's inventory."""
-    console = Console()
-    inventory_ui = InventoryUI(console)
-    inventory_ui.game_state = scene_manager.game_state
-    
-    inventory_ui.show("Player", "Check your gear", scene_manager=scene_manager)
-    
-    # Return to start scene
-    scene_manager.transition_to("start", "Finished checking inventory")
-
-
-def scene_end(scene_manager, **kwargs):
-    """End scene with final dialogue."""
-    console = Console()
-    dialogue_ui = DialogueBox(console)
-    dialogue_ui.game_state = scene_manager.game_state
-    
-    dialogue_ui.show(
-        "Narrator", 
-        [
-            "With the goblin defeated and treasure in hand, you decide to return to town.",
-            "This adventure has come to an end, but many more await in the future!",
-            "THE END"
-        ],
-        "Adventure Complete",
-        scene_manager=scene_manager
-    )
-    
-    # End the game by setting current_scene to None
-    scene_manager.current_scene_id = None
+    try:
+        # Load and run the script
+        runner.load_from_file(args.script)
+        runner.run(args.scene)
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        if args.debug:
+            console.print("[bold red]Traceback:[/bold red]")
+            import traceback
+            traceback.print_exc()
+        else:
+            console.print("Run with --debug for more information.")
 
 
 if __name__ == "__main__":

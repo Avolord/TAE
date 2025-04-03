@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Union, Callable, Optional
-from .game_state import GameState
+from tae_engine.game_state import GameState
 
 class Condition:
     """Base class for conditions that can be checked against the game state."""

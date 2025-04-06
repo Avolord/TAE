@@ -72,4 +72,10 @@
 
 * Continue on the road {} {set_var:game_completed:true}
 
+@if check_var:seeking_treasure:==:true
+> Narrator: Hello
+@else
+> Narrator: Hello
+@endif
+
 // End of simple example

@@ -6,28 +6,9 @@ class GameState:
     """Class to store and manage the game state."""
     
     def __init__(self):
-        self.inventory = {}
-        self.stats = {}
-        self.history = []
-        self.current_scene = None
-        self.game_variables = {}
-    
-    def save(self, filename: str = None) -> str:
-        """Save the current game state to a file."""
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"save_{timestamp}.sav"
-        
-        with open(filename, 'wb') as f:
-            pickle.dump(self, f)
-        
-        return filename
-    
-    @staticmethod
-    def load(filename: str) -> 'GameState':
-        """Load a game state from a file."""
-        with open(filename, 'rb') as f:
-            return pickle.load(f)
+        self.inventory: Dict[str, int] = {}
+        self.stats: Dict[str, Any] = {}
+        self.game_variables: Dict[str, Any] = {}
     
     def add_to_inventory(self, item_name: str, quantity: int = 1) -> None:
         """Add an item to the inventory."""
@@ -101,3 +82,23 @@ class GameState:
     def get_variable(self, name: str, default: Any = None) -> Any:
         """Get a game variable, returning default if it doesn't exist."""
         return self.game_variables.get(name, default)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the game state to a JSON-serializable dictionary."""
+        # Assuming inventory, stats, game_variables contain JSON-serializable types
+        return {
+            "inventory": self.inventory,
+            "stats": self.stats,
+            "game_variables": self.game_variables,
+            # Add any other state variables here
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'GameState':
+        """Creates a GameState instance from a dictionary."""
+        state = cls()
+        state.inventory = data.get("inventory", {})
+        state.stats = data.get("stats", {})
+        state.game_variables = data.get("game_variables", {})
+        # Load any other state variables here
+        return state

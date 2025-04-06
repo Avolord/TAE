@@ -1,12 +1,14 @@
 # tales_parser.py
 from dataclasses import dataclass, field
 from tae_engine.tales_lexer import TokenType, TalesLexer
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple, Optional
 
 # --- Base Class ---
+@dataclass
 class Element:
     """Base class marker for type hinting AST nodes."""
-    pass
+    element_id: Optional[str] = field(default=None, init=False, repr=True) # ID assigned later
+    parent: Optional['Element'] = field(default=None, init=False, repr=False)
 
 # --- Concrete Elements as Dataclasses ---
 
@@ -15,7 +17,9 @@ class SceneElement(Element):
     """Represents a scene definition."""
     scene_name: str
     content: List[Element] = field(default_factory=list)
-    # ... (repr method)
+    
+    # def __repr__(self) -> str:
+    #     return f"Scene(name='{self.scene_name}', content={self.content})"
 
 @dataclass
 class DialogueElement(Element):
@@ -25,9 +29,9 @@ class DialogueElement(Element):
     # Store raw effect strings
     effects: List[str] = field(default_factory=list)
 
-    def __repr__(self) -> str:
-        fx_info = f", effects={self.effects}" if self.effects else ""
-        return f"Dialogue(speaker='{self.speaker}', text='{self.dialogue_text}'{fx_info})"
+    # def __repr__(self) -> str:
+    #     fx_info = f", effects={self.effects}" if self.effects else ""
+    #     return f"Dialogue(speaker='{self.speaker}', text='{self.dialogue_text}'{fx_info})"
 
 @dataclass
 class ChoiceElement(Element):
@@ -40,22 +44,22 @@ class ChoiceElement(Element):
     # Store raw effect strings
     effects: List[str] = field(default_factory=list)
 
-    def __repr__(self) -> str:
-        parts = [f"Choice(level={self.level}, text='{self.text}'"]
-        if self.transition:
-            parts.append(f" -> {self.transition}")
-        if self.condition_str:
-            parts.append(f", condition='{self.condition_str}'")
-        if self.effects:
-            parts.append(f", effects={self.effects}")
-        parts.append(")")
-        return "".join(parts)
+    # def __repr__(self) -> str:
+    #     parts = [f"Choice(level={self.level}, text='{self.text}'"]
+    #     if self.transition:
+    #         parts.append(f" -> {self.transition}")
+    #     if self.condition_str:
+    #         parts.append(f", condition='{self.condition_str}'")
+    #     if self.effects:
+    #         parts.append(f", effects={self.effects}")
+    #     parts.append(")")
+    #     return "".join(parts)
 
 # --- IfElement and Condition/Effect placeholders remain the same for now ---
 @dataclass
 class Condition(Element): # Placeholder for IfElement's condition
     representation: str
-    def __repr__(self): return f"Condition({self.representation})"
+    #def __repr__(self): return f"Condition({self.representation})"
 
 @dataclass
 class IfElement(Element):
@@ -70,6 +74,7 @@ class TalesParser:
     def __init__(self, token_lines: Dict[int, List[Tuple[TokenType, str]]]):
         self.token_lines = token_lines
         self.ast: List[SceneElement] = []
+        self.unique_scene_names: set[str] = set()
         self._lines = list(self.token_lines.values())
         self._line_numbers = list(self.token_lines.keys())
 
@@ -244,9 +249,8 @@ class TalesParser:
          return Condition(representation=rep)
 
 
-    def parse(self) -> List[SceneElement]:
-        # ... (previous implementation, calls _match_scene and parse_scene) ...
-        self.ast = []
+    def _build_raw_ast(self) -> List[SceneElement]:
+        scenes = []
         current_line_idx = 0
         num_lines = len(self._lines)
 
@@ -264,7 +268,13 @@ class TalesParser:
                     next_line_idx, populated_scene_element = self.parse_scene(
                         scene_element, current_line_idx + 1
                     )
-                    self.ast.append(populated_scene_element)
+                    
+                    # Make sure the scene name is unique
+                    if populated_scene_element.scene_name in self.unique_scene_names:
+                        raise ValueError(f"Duplicate scene name '{populated_scene_element.scene_name}' found.")
+                    self.unique_scene_names.add(populated_scene_element.scene_name)
+                    
+                    scenes.append(populated_scene_element)
                     current_line_idx = next_line_idx
                 else:
                     raise ValueError(f"Expected '@scene' definition or empty line, but found: {current_tokens[0][1]}")
@@ -273,8 +283,15 @@ class TalesParser:
             except NotImplementedError as e:
                 raise NotImplementedError(f"Parsing feature not implemented near line {current_file_line_num}: {e}") from e
 
-        return self.ast
+        return scenes
 
+    def parse(self) -> List[SceneElement]:
+        raw_ast = self._build_raw_ast()
+
+        raw_ast = self._assign_stable_ids_and_parents(raw_ast)
+
+        self.ast = raw_ast
+        return self.ast
 
     def parse_scene(
         self, scene_element: SceneElement, start_line_idx: int
@@ -416,6 +433,30 @@ class TalesParser:
         raise ValueError(f"Unterminated '@if' block starting near line {initial_file_line_num}")
 
 
+    def _assign_stable_ids_and_parents(self, elements: List[Element], parent: Optional[Element] = None, current_path: str = ""):
+        """Recursively assigns path-based IDs and parent references."""
+        if not elements:
+            return elements
+        
+        for i, element in enumerate(elements):
+            element.parent = parent  # Set the parent reference
+            
+            if type(element) == SceneElement:
+                # Assign the scene name as the ID
+                element.element_id = current_path + element.scene_name
+                
+                # Call the function recursively for the content of the scene
+                element.content = self._assign_stable_ids_and_parents(element.content, element, f"{element.element_id}:c")
+            elif type(element) == IfElement:
+                element.element_id = f"{current_path}[{i}]"
+                
+                element.if_block = self._assign_stable_ids_and_parents(element.if_block, element, f"{element.element_id}:if")
+                element.else_block = self._assign_stable_ids_and_parents(element.else_block, element, f"{element.element_id}:else")
+            else:
+                element.element_id = f"{current_path}[{i}]"
+                
+        return elements
+
 # --- Main Execution Block ---
 # ... (Keep the __main__ block as it was) ...
 if __name__ == "__main__":
@@ -441,6 +482,7 @@ if __name__ == "__main__":
             print("Parsing resulted in an empty structure.")
         for scene in parsed_ast:
             print(scene)
+            print("-"*20)
             # Optional: Print content of each scene for more detail
             # for element in scene.content:
             #     print(f"  {element}")
